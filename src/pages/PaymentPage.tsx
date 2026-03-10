@@ -1,21 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRPaymentCard } from '@/components/ui/QRPaymentCard';
 import { motion } from 'motion/react';
 import { ArrowLeft, ShieldCheck, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { db, storage } from '@/lib/firebase';
+import { useAuth } from '@/contexts/AuthContext';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { addDoc, collection, doc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 export function PaymentPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [orderStatus, setOrderStatus] = useState<'pending' | 'processing' | 'success' | 'failed'>('pending');
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
 
-  const handleUploadScreenshot = (file: File) => {
-    // Simulate API call to upload screenshot and verify payment
+  // Poll/Listen to active order status
+  useEffect(() => {
+    if (!activeOrderId) return;
+    const unsubscribe = onSnapshot(doc(db, 'orders', activeOrderId), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().status) {
+        setOrderStatus(docSnap.data().status);
+      }
+    });
+    return () => unsubscribe();
+  }, [activeOrderId]);
+
+  const handleUploadScreenshot = async (file: File) => {
+    if (!user) return;
     setOrderStatus('processing');
-    
-    setTimeout(() => {
-      // Simulate successful verification
-      setOrderStatus('success');
-    }, 3000);
+
+    try {
+      // Upload file to Firebase Storage
+      const storageRef = ref(storage, `payments/${user.uid}/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+
+      // Create an explicit order document in Firestore
+      const docRef = await addDoc(collection(db, 'orders'), {
+        userId: user.uid,
+        amount: 100,
+        screenshotUrl: downloadURL,
+        status: 'processing',
+        createdAt: serverTimestamp()
+      });
+
+      setActiveOrderId(docRef.id);
+
+      // In a real app the backend triggers the 'success', but for the demo simulate an admin verifying it
+      setTimeout(() => {
+        setOrderStatus('success');
+        // Theoretically update the user subscription status in firestore here as well
+      }, 5000);
+
+    } catch (error) {
+      console.error(error);
+      setOrderStatus('failed');
+    }
   };
 
   return (
@@ -35,9 +75,9 @@ export function PaymentPage() {
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-secondary/20 rounded-full blur-[120px] pointer-events-none" />
 
         <div className="w-full max-w-5xl mx-auto grid lg:grid-cols-2 gap-8 lg:gap-12 items-center z-10">
-          
+
           {/* Left Column: Benefits */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
@@ -49,7 +89,7 @@ export function PaymentPage() {
                 Velora Premium
               </div>
               <h2 className="text-4xl sm:text-5xl font-bold text-text-main tracking-tight leading-tight">
-                Unlock the ultimate <br/>
+                Unlock the ultimate <br />
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">
                   AI Companion
                 </span>
@@ -67,7 +107,7 @@ export function PaymentPage() {
                 "Priority server access (zero wait time)",
                 "Ad-free experience"
               ].map((benefit, i) => (
-                <motion.li 
+                <motion.li
                   key={i}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -87,8 +127,8 @@ export function PaymentPage() {
           <div className="w-full flex justify-center lg:justify-end">
             <QRPaymentCard
               amount={100}
-              upiId="velora@upi"
-              qrDataUrl="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=velora@upi&pn=Velora%20Premium&am=100&cu=INR"
+              upiId="s49282804@okaxis"
+              qrDataUrl="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=s49282804@okaxis&pn=Velora%20Premium&am=100&cu=INR"
               onUploadScreenshot={handleUploadScreenshot}
               orderStatus={orderStatus}
             />
